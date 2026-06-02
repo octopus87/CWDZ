@@ -48,9 +48,33 @@ build\package_release.bat
 
 ## GitHub Actions 自动打 Windows 包
 
-本机是 Mac 时，可把项目推到 GitHub 后，在仓库 **Actions → Build Windows → Run workflow** 手动触发。
+### 一键触发（推荐）
 
-约 30–60 分钟后，在运行记录的 **Artifacts** 中下载 `CWDZ-Windows-x64.zip`，解压到本机 `dist/` 即可。
+1. 安装 [GitHub CLI](https://cli.github.com/)（或 `brew install gh`）
+2. 在终端登录（会打开浏览器）：
+
+```bash
+gh auth login -h github.com -p https -w
+```
+
+3. 在项目目录执行：
+
+```bash
+chmod +x build/trigger_windows_build.sh
+./build/trigger_windows_build.sh
+```
+
+脚本会：创建/推送 GitHub 仓库 → 触发 **Build Windows** workflow → 等待完成 → 下载 `dist/CWDZ-Windows-x64.zip`。
+
+私有仓库默认名 `CWDZ`，可通过环境变量改：
+
+```bash
+GITHUB_REPO_NAME=财务对账工具 GITHUB_REPO_VISIBILITY=private ./build/trigger_windows_build.sh
+```
+
+### 网页手动触发
+
+已推送代码后，打开仓库 **Actions → Build Windows → Run workflow**，约 30–60 分钟后在 **Artifacts** 下载 `CWDZ-Windows-x64.zip`。
 
 工作流文件：`.github/workflows/build-windows.yml`
 
