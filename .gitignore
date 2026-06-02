@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/cwdz/
+*.spec.bak
+.env
+config/local.yaml
+data/downloads/*
+data/output/*
+data/.auth/*
+!data/downloads/.gitkeep
+!data/output/.gitkeep
+.playwright/
+*.log
