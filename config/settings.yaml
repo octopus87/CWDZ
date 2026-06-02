@@ -1,0 +1,37 @@
+# 停简单平台配置（请勿将密码提交到版本库，本地使用 config/local.yaml 覆盖）
+tingsimple:
+  base_url: "https://open.tingjiandan.com/bmp-web/"
+  login_url: "https://open.tingjiandan.com/bmp-web/"
+  download_dir: "/Users/octopus/Downloads"
+
+# 科拓平台
+keytop:
+  login_url: "https://park.keytop.cn/unityp/login"
+  download_dir: "/Users/octopus/Downloads/科拓"
+  auth_state_path: "data/.auth/keytop.json"
+  qr_expire_days: 30
+  login_timeout: 180
+
+# 对账与凭证
+reconcile:
+  input_dir: "/Users/octopus/Downloads"
+  output_dir: "data/output"
+
+voucher:
+  template_path: "voucher/template.xlsx"
+  output_dir: "data/output/vouchers"
+
+# 下载方式: api（推荐）或 browser
+download:
+  mode: api
+
+# 验证码识别
+captcha:
+  auto_ocr: true
+  max_retries: 3
+
+# 浏览器自动化（验证码在程序界面显示，可后台运行浏览器）
+browser:
+  headless: true
+  timeout_ms: 60000
+  auth_state_path: "data/.auth/state.json"
