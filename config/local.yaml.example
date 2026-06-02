@@ -1,0 +1,9 @@
+# 复制为 local.yaml 并填写真实账号（local.yaml 已在 .gitignore 中）
+tingsimple:
+  username: "your_username"
+  password: "your_password"
+
+# 示例：config/local.yaml
+# tingsimple:
+#   username: "yghtcw"
+#   password: "yghtcw123!"
