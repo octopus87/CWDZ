@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCalendarWidget,
     QDateEdit,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -35,7 +37,7 @@ SPACING_LOGIN_COL = 6
 
 LIST_ROW_HEIGHT = 36
 LIST_ROW_TALL_HEIGHT = 52
-LIST_ROW_LABEL_WIDTH = 100
+LIST_ROW_LABEL_WIDTH = 148
 LIST_ROW_MARGIN_H = 16
 CONTENT_PANEL_MARGINS = (16, 14, 16, 14)
 INLINE_FIELD_WIDTH = 140
@@ -77,15 +79,53 @@ def make_inline_line_edit(
 
 
 def make_inline_date_edit() -> QDateEdit:
-    field = QDateEdit(calendarPopup=True)
+    field = QDateEdit()
     field.setObjectName("InlineField")
     field.setDisplayFormat("yyyy/M/d")
     field.setFixedHeight(24)
     field.setMinimumWidth(100)
     field.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    field.setCalendarPopup(True)
     field.setButtonSymbols(QDateEdit.ButtonSymbols.NoButtons)
     return field
+
+
+def open_date_calendar(date_edit: QDateEdit) -> None:
+    """弹出日历选择当前日期控件值。"""
+    dialog = QDialog(date_edit.window())
+    dialog.setWindowTitle("选择日期")
+    dialog.setWindowFlags(
+        Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
+    )
+    calendar = QCalendarWidget(dialog)
+    calendar.setGridVisible(True)
+    calendar.setSelectedDate(date_edit.date())
+
+    def pick(day: QDate) -> None:
+        if day.isValid():
+            date_edit.setDate(day)
+        dialog.accept()
+
+    calendar.clicked.connect(pick)
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(4, 4, 4, 4)
+    layout.addWidget(calendar)
+    anchor = date_edit.mapToGlobal(date_edit.rect().bottomLeft())
+    dialog.move(anchor)
+    dialog.exec()
+
+
+def make_date_trailing(date_edit: QDateEdit) -> QWidget:
+    """日期输入 + 日历按钮。"""
+    calendar_btn = QPushButton("日历")
+    calendar_btn.setObjectName("CompactButton")
+    calendar_btn.setFixedHeight(COMPACT_BUTTON_HEIGHT)
+    calendar_btn.setMinimumWidth(52)
+    calendar_btn.setToolTip("打开日历选择日期")
+    calendar_btn.clicked.connect(lambda: open_date_calendar(date_edit))
+    date_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    return make_trailing_bar((date_edit, 1), (calendar_btn, 0))
 
 
 def make_path_field(text: str = "", placeholder: str = "") -> QLineEdit:

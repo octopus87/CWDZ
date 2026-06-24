@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 HEADER_ROW_OFFSET = 6
 NAME_COLUMN = "停车场名称"
+SOURCE_FILE_COLUMN = "来源文件"
 EXCEL_SUFFIXES = (".xlsx", ".xls")
 ORDER_COUNT_PATTERN = re.compile(r"订单数量\s*:\s*(\d+)")
 
@@ -36,7 +37,11 @@ def merge_tingsimple_exports(input_dir: Path) -> MergeResult:
         raise ValueError(f"目录不存在: {input_dir}")
 
     files = sorted(
-        p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() in EXCEL_SUFFIXES
+        p
+        for p in input_dir.iterdir()
+        if p.is_file()
+        and p.suffix.lower() in EXCEL_SUFFIXES
+        and not p.name.startswith((".~", "~$"))
     )
     if not files:
         raise ValueError(f"目录中没有 Excel 文件: {input_dir}")
@@ -51,12 +56,19 @@ def merge_tingsimple_exports(input_dir: Path) -> MergeResult:
             logger.info("跳过无数据文件: %s", file_path.name)
             continue
 
-        df = parse_tingsimple_export(file_path)
+        try:
+            df = parse_tingsimple_export(file_path)
+        except Exception as exc:
+            skipped.append(file_path.name)
+            logger.warning("跳过无法解析的文件 %s: %s", file_path.name, exc)
+            continue
+
         if df.empty:
             skipped.append(file_path.name)
             logger.info("跳过空数据文件: %s", file_path.name)
             continue
 
+        df.insert(0, SOURCE_FILE_COLUMN, file_path.name)
         frames.append(df)
         processed.append(file_path.name)
         logger.info("已读取: %s (%d 行)", file_path.name, len(df))
@@ -77,7 +89,7 @@ def merge_tingsimple_exports(input_dir: Path) -> MergeResult:
 def _read_export_sheet(file_path: Path) -> pd.DataFrame:
     suffix = file_path.suffix.lower()
     if suffix in EXCEL_SUFFIXES:
-        df = pd.read_excel(file_path, skiprows=HEADER_ROW_OFFSET, header=0)
+        df = _read_excel(file_path, skiprows=HEADER_ROW_OFFSET, header=0)
     elif suffix == ".csv":
         df = pd.read_csv(file_path, encoding="utf-8-sig", skiprows=HEADER_ROW_OFFSET)
     else:
@@ -87,10 +99,33 @@ def _read_export_sheet(file_path: Path) -> pd.DataFrame:
     return df
 
 
+def _excel_engines(file_path: Path) -> list[str | None]:
+    suffix = file_path.suffix.lower()
+    if suffix == ".xls":
+        return ["xlrd"]
+    if suffix == ".xlsx":
+        return ["openpyxl", "xlrd"]
+    return ["openpyxl", "xlrd"]
+
+
+def _read_excel(file_path: Path, **kwargs) -> pd.DataFrame:
+    last_error: Exception | None = None
+    for engine in _excel_engines(file_path):
+        try:
+            return pd.read_excel(file_path, engine=engine, **kwargs)
+        except Exception as exc:
+            last_error = exc
+    raise ValueError(f"无法读取 Excel 文件 {file_path.name}: {last_error}") from last_error
+
+
 def _file_has_data(file_path: Path) -> bool:
     """根据汇总区「订单数量」判断文件是否有明细数据。"""
+    suffix = file_path.suffix.lower()
+    if suffix not in EXCEL_SUFFIXES:
+        return True
+
     try:
-        summary = pd.read_excel(file_path, header=None, nrows=5)
+        summary = _read_excel(file_path, header=None, nrows=5)
     except Exception:
         return True
 

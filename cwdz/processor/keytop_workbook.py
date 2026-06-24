@@ -20,6 +20,7 @@ ACCOUNT_FLOW_HEADERS = [
 ]
 
 NO_PERMISSION_MSG = "当前账号无该车场权限，无法下载数据"
+NO_PERMISSION_TAB_COLOR = "FF0000"
 
 
 def normalize_lot_name(name: str) -> str:
@@ -64,6 +65,12 @@ def write_sheet_message(ws: Worksheet, message: str) -> None:
     clear_sheet_data(ws)
     ws.append(list(ACCOUNT_FLOW_HEADERS))
     ws.cell(row=2, column=1, value=message)
+
+
+def mark_sheet_no_permission(ws: Worksheet) -> None:
+    """无车场权限：写入提示并将页签标红。"""
+    write_sheet_message(ws, NO_PERMISSION_MSG)
+    ws.sheet_properties.tabColor = NO_PERMISSION_TAB_COLOR
 
 
 def load_task_workbook(path: str | Path):

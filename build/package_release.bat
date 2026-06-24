@@ -3,6 +3,12 @@ setlocal EnableExtensions
 cd /d "%~dp0\..\dist"
 
 if exist "CWDZ\CWDZ.exe" (
+    echo ==^> 生成启动脚本
+    (
+        echo @echo off
+        echo cd /d "%%~dp0"
+        echo start "" "%%~dp0CWDZ.exe"
+    ) > "CWDZ\启动财务对账工具.bat"
     echo ==^> 打包 Windows: CWDZ-Windows-x64.zip
     if exist "CWDZ-Windows-x64.zip" del /f "CWDZ-Windows-x64.zip"
     powershell -NoProfile -Command "Compress-Archive -Path 'CWDZ' -DestinationPath 'CWDZ-Windows-x64.zip' -Force"

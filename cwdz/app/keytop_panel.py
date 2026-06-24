@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cwdz.app.input_memory import apply_default_keytop_query_dates, input_memory
 from cwdz.app.widgets.apple_ui import (
     COMPACT_BUTTON_HEIGHT,
     SPACING_COLUMNS,
@@ -25,8 +26,8 @@ from cwdz.app.widgets.apple_ui import (
     GroupedSection,
     ListRow,
     make_column_layout,
+    make_date_trailing,
     make_inline_date_edit,
-    make_inline_slot,
     make_page_layout,
     make_path_field,
     make_path_trailing,
@@ -123,22 +124,20 @@ class KeytopDownloadPanel(QWidget):
         form_wrap = QWidget()
         form_col = make_column_layout(form_wrap)
 
-        today = QDate.currentDate()
-        prev_month = today.addMonths(-1)
         self._start = make_inline_date_edit()
         self._end = make_inline_date_edit()
-        self._start.setDate(QDate(prev_month.year(), prev_month.month(), 2))
-        self._end.setDate(QDate(today.year(), today.month(), 1))
+        apply_default_keytop_query_dates(self._start, self._end)
 
         date_section = GroupedSection("批量下载")
         date_section.add_row(
-            ListRow("开始日期", trailing=make_inline_slot(self._start), trailing_expand=True)
+            ListRow("开始日期", trailing=make_date_trailing(self._start), trailing_expand=True)
         )
         date_section.add_row(
-            ListRow("结束日期", trailing=make_inline_slot(self._end), trailing_expand=True, last=True)
+            ListRow("结束日期", trailing=make_date_trailing(self._end), trailing_expand=True, last=True)
         )
 
         default_task = "/Users/octopus/Downloads/科拓代扣4.29-6.1.xlsx"
+        self._default_task = default_task
         self._task_file = make_path_field(default_task)
         task_browse_btn = QPushButton("浏览…")
         task_browse_btn.setObjectName("CompactButton")
@@ -151,6 +150,7 @@ class KeytopDownloadPanel(QWidget):
         )
 
         default_dir = str(resolve_path(kt.get("download_dir", "/Users/octopus/Downloads/科拓")))
+        self._default_download_dir = default_dir
         self._download_dir = make_path_field(default_dir)
         browse_btn = QPushButton("浏览…")
         browse_btn.setObjectName("CompactButton")
@@ -180,6 +180,19 @@ class KeytopDownloadPanel(QWidget):
         root_outer.addWidget(body)
         root_outer.addWidget(action_bar)
         root_outer.addStretch()
+
+    def load_input_memory(self) -> None:
+        memory = input_memory()
+        apply_default_keytop_query_dates(self._start, self._end)
+        memory.load_line_edit(self._task_file, "inputs/keytop/task_file", self._default_task)
+        memory.load_line_edit(
+            self._download_dir, "inputs/keytop/download_dir", self._default_download_dir
+        )
+
+    def save_input_memory(self) -> None:
+        memory = input_memory()
+        memory.save_line_edit(self._task_file, "inputs/keytop/task_file")
+        memory.save_line_edit(self._download_dir, "inputs/keytop/download_dir")
 
     def set_busy(self, busy: bool) -> None:
         enabled = not busy and self._logged_in

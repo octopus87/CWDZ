@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from cwdz import __version__
+from cwdz.app.input_memory import input_memory
 from cwdz.app.tabs import DownloadTab, ProcessTab, VoucherTab
 from cwdz.app.theme import apply_app_theme
 from cwdz.paths import ensure_runtime_dirs
@@ -98,19 +99,36 @@ class MainWindow(QMainWindow):
         self._process_tab.log_message.connect(self._log.append)
         self._voucher_tab.log_message.connect(self._log.append)
         self._download_tab.download_dir_changed.connect(self._process_tab.set_source_dir)
+        self._download_tab.download_file_changed.connect(self._process_tab.set_source_file)
+        self._process_tab.process_file_changed.connect(self._voucher_tab.set_source_file)
 
         self._download_tab.set_platform(self._platform.current_text())
         self._stack.setCurrentIndex(0)
+
+        QApplication.instance().aboutToQuit.connect(self._save_input_memory)
+
+    def _save_input_memory(self) -> None:
+        self._download_tab.save_input_memory()
+        self._process_tab.save_input_memory()
+        self._voucher_tab.save_input_memory()
+        input_memory().sync()
 
     def _on_step_changed(self, index: int) -> None:
         self._stack.setCurrentIndex(index)
         if index == 0:
             self._download_tab.activate(self._platform.current_text())
+        elif index == 2:
+            last = self._process_tab.last_output_path()
+            if last:
+                self._voucher_tab.set_source_file(last)
 
     def _on_platform_changed(self, platform: str) -> None:
         self._download_tab.set_platform(platform)
         self._process_tab.set_platform(platform)
         self._voucher_tab.set_platform(platform)
+        last = self._process_tab.last_output_path()
+        if last:
+            self._voucher_tab.set_source_file(last)
 
 def setup_logging() -> None:
     logging.basicConfig(

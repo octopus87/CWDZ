@@ -20,6 +20,17 @@ reconcile:
 voucher:
   template_path: "voucher/template.xlsx"
   output_dir: "data/output/vouchers"
+  tingsimple:
+    account_mapping_path: "/Users/octopus/Downloads/停简单凭证/项目对应收款账户信息.xlsx"
+    unsettled_template_path: "/Users/octopus/Downloads/停简单凭证/代扣结算未到账凭证.xlsx"
+    fee_template_path: "/Users/octopus/Downloads/停简单凭证/代扣结算已到账凭证.xlsx"
+    bank_template_path: "/Users/octopus/Downloads/停简单凭证/银行存款凭证.xlsx"
+    output_dir: "/Users/octopus/Downloads/停简单凭证"
+  keytop:
+    account_mapping_path: "/Users/octopus/Downloads/凭证/凭证导入-项目对应收款账户信息.xlsx"
+    fee_template_path: "/Users/octopus/Downloads/凭证/凭证模版-科拓手续费.xlsx"
+    withdrawal_template_path: "/Users/octopus/Downloads/凭证/凭证模版-科拓提现.xlsx"
+    output_dir: "/Users/octopus/Downloads/凭证"
 
 # 下载方式: api（推荐）或 browser
 download:

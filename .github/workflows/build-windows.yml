@@ -22,8 +22,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements.txt
 
       - name: Install dependencies and Chromium
         shell: pwsh
@@ -51,6 +49,12 @@ jobs:
       - name: Create release zip
         shell: pwsh
         run: |
+          $launcher = @"
+          @echo off
+          cd /d "%~dp0"
+          start "" "%~dp0CWDZ.exe"
+          "@
+          Set-Content -Path "dist\CWDZ\启动财务对账工具.bat" -Value $launcher -Encoding Default
           Compress-Archive -Path "dist\CWDZ" -DestinationPath "dist\CWDZ-Windows-x64.zip" -Force
           Get-Item "dist\CWDZ-Windows-x64.zip" | Format-List Name, Length
 

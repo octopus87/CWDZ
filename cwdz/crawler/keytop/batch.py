@@ -11,6 +11,7 @@ from cwdz.crawler.keytop.client import KeytopClient
 from cwdz.processor.keytop_workbook import (
     NO_PERMISSION_MSG,
     load_task_workbook,
+    mark_sheet_no_permission,
     save_task_workbook,
     write_sheet_message,
     write_sheet_rows,
@@ -129,7 +130,7 @@ def download_batch_workbook(
             continue
 
         if not profile:
-            write_sheet_message(ws, NO_PERMISSION_MSG)
+            mark_sheet_no_permission(ws)
             result.sheets.append(
                 BatchSheetResult(
                     sheet_name=sheet_name,
@@ -137,7 +138,7 @@ def download_batch_workbook(
                     message=NO_PERMISSION_MSG,
                 )
             )
-            client._report(f"  → 无车场权限，已写入提示", on_progress)
+            client._report("  → 无车场权限，页签已标红", on_progress)
             continue
 
         lot_name = profile.lot_name or sheet_name

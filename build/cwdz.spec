@@ -6,7 +6,8 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files
 
-ROOT = Path(SPECPATH).parent
+# spec 在 build/ 下：SPECPATH 为 build 目录，上一级才是项目根
+ROOT = Path(SPECPATH).resolve().parent
 APP_NAME = "CWDZ"
 DISPLAY_NAME = "财务对账工具"
 
@@ -40,6 +41,9 @@ hiddenimports = [
     "PIL",
     "cv2",
     "numpy",
+    "chinese_calendar",
+    "chinese_calendar.constants",
+    "chinese_calendar.utils",
 ]
 
 a = Analysis(
@@ -50,7 +54,10 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[str(ROOT / "build" / "runtime_hook_playwright.py")],
+    runtime_hooks=[
+        str(ROOT / "build" / "runtime_hook_cwd.py"),
+        str(ROOT / "build" / "runtime_hook_playwright.py"),
+    ],
     excludes=["tkinter", "matplotlib", "scipy"],
     noarchive=False,
     optimize=0,

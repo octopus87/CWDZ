@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import traceback
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from PySide6.QtCore import QDate, Qt, QThread, QTimer, Signal
@@ -22,6 +22,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cwdz.app.input_memory import (
+    apply_default_query_dates,
+    default_voucher_period,
+    input_memory,
+)
 from cwdz.app.keytop_panel import KeytopDownloadPanel
 from cwdz.app.widgets.apple_ui import (
     COMPACT_BUTTON_HEIGHT,
@@ -33,6 +38,7 @@ from cwdz.app.widgets.apple_ui import (
     PageHeader,
     make_bar_line_edit,
     make_column_layout,
+    make_date_trailing,
     make_inline_date_edit,
     make_inline_line_edit,
     make_inline_slot,
@@ -45,10 +51,12 @@ from cwdz.config import load_settings, resolve_path
 from cwdz.crawler.keytop.batch import download_batch_workbook
 from cwdz.crawler.keytop.client import KeytopClient
 from cwdz.crawler.session import TingsimpleClient
-from cwdz.processor.parser import merge_tingsimple_exports, parse_tingsimple_export
+from cwdz.processor.keytop_merge import build_merge_output_path, merge_keytop_workbook
+from cwdz.processor.parser import merge_tingsimple_exports
 from cwdz.processor.reconcile import reconcile, save_reconciled
 from cwdz.processor.validator import validate
-from cwdz.voucher.generator import generate_voucher
+from cwdz.voucher.tingsimple_generator import generate_tingsimple_vouchers
+from cwdz.voucher.keytop_generator import generate_keytop_vouchers
 
 
 class ClickableLabel(QLabel):
@@ -133,33 +141,80 @@ class Worker(QThread):
                 )
                 self.finished_ok.emit(summary)
             elif self.task == "process":
-                input_dir = Path(self.kwargs["input_dir"])
-                merge_result = merge_tingsimple_exports(input_dir)
-                for msg in [
-                    f"合并 {len(merge_result.processed_files)} 个文件",
-                    *[f"  ✓ {name}" for name in merge_result.processed_files],
-                ]:
-                    self.progress.emit(msg)
-                for name in merge_result.skipped_files:
-                    self.progress.emit(f"  - 跳过: {name}")
+                platform = self.kwargs.get("platform", "停简单")
+                if platform == "科拓":
+                    input_path = Path(self.kwargs["input_path"])
+                    merge_result = merge_keytop_workbook(input_path)
+                    for name in merge_result.processed_sheets:
+                        self.progress.emit(f"  ✓ 页签 {name}")
+                    for name in merge_result.skipped_sheets:
+                        self.progress.emit(f"  - 跳过页签: {name}")
+                    self.progress.emit(
+                        f"合并 {len(merge_result.processed_sheets)} 个页签，"
+                        f"共 {len(merge_result.dataframe)} 行"
+                    )
+                    df = merge_result.dataframe
+                    errors = validate(df)
+                    if errors:
+                        raise ValueError("\n".join(errors))
+                    result = reconcile(df)
+                    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    out = save_reconciled(
+                        result,
+                        build_merge_output_path(merge_result.source_file, stamp),
+                    )
+                else:
+                    input_dir = Path(self.kwargs["input_dir"])
+                    merge_result = merge_tingsimple_exports(input_dir)
+                    for msg in [
+                        f"合并 {len(merge_result.processed_files)} 个文件",
+                        *[f"  ✓ {name}" for name in merge_result.processed_files],
+                    ]:
+                        self.progress.emit(msg)
+                    for name in merge_result.skipped_files:
+                        self.progress.emit(f"  - 跳过: {name}")
 
-                df = merge_result.dataframe
-                errors = validate(df)
-                if errors:
-                    raise ValueError("\n".join(errors))
-                result = reconcile(df)
-                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                out = save_reconciled(result, input_dir / f"对账结果_合并_{stamp}.xlsx")
+                    df = merge_result.dataframe
+                    errors = validate(df)
+                    if errors:
+                        raise ValueError("\n".join(errors))
+                    result = reconcile(df)
+                    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    out = save_reconciled(result, input_dir / f"对账结果_合并_{stamp}.xlsx")
                 self.finished_ok.emit(str(out))
             elif self.task == "voucher":
-                input_path = Path(self.kwargs["input_path"])
+                platform = self.kwargs.get("platform", "停简单")
                 period = self.kwargs.get("period", "")
-                df = parse_tingsimple_export(input_path)
-                settings = load_settings()
-                template = resolve_path(settings["voucher"]["template_path"])
-                output_dir = resolve_path(settings["voucher"]["output_dir"])
-                out = generate_voucher(df, template, output_dir, period=period or None)
-                self.finished_ok.emit(str(out))
+                if platform == "科拓":
+                    settings = load_settings()
+                    kt_voucher = settings.get("voucher", {}).get("keytop", {})
+                    result = generate_keytop_vouchers(
+                        Path(self.kwargs["input_path"]),
+                        Path(self.kwargs["account_mapping_path"]),
+                        resolve_path(kt_voucher["fee_template_path"]),
+                        resolve_path(kt_voucher["withdrawal_template_path"]),
+                        Path(self.kwargs["output_dir"]),
+                        period=period,
+                        on_progress=self.progress.emit,
+                    )
+                    payload = f"{result.fee_path}|{result.withdrawal_path}"
+                else:
+                    settings = load_settings()
+                    ts_voucher = settings.get("voucher", {}).get("tingsimple", {})
+                    result = generate_tingsimple_vouchers(
+                        Path(self.kwargs["input_path"]),
+                        Path(self.kwargs["account_mapping_path"]),
+                        resolve_path(ts_voucher["unsettled_template_path"]),
+                        resolve_path(ts_voucher["fee_template_path"]),
+                        resolve_path(ts_voucher["bank_template_path"]),
+                        Path(self.kwargs["output_dir"]),
+                        period=period,
+                        on_progress=self.progress.emit,
+                    )
+                    payload = (
+                        f"{result.unsettled_path}|{result.fee_path}|{result.bank_path}"
+                    )
+                self.finished_ok.emit(payload)
             else:
                 raise ValueError(f"未知任务: {self.task}")
         except Exception as exc:
@@ -169,6 +224,7 @@ class Worker(QThread):
 class DownloadTab(QWidget):
     log_message = Signal(str)
     download_dir_changed = Signal(str)
+    download_file_changed = Signal(str)
 
     _PLATFORM_HEADER: dict[str, tuple[str, str]] = {
         "停简单": ("下载对账", "登录停简单商户后台，按账期导出对账明细。"),
@@ -202,6 +258,22 @@ class DownloadTab(QWidget):
         layout = make_page_layout(self)
         layout.addWidget(self._page_header)
         layout.addWidget(self._stack)
+        self.load_input_memory()
+
+    def load_input_memory(self) -> None:
+        memory = input_memory()
+        apply_default_query_dates(self._start, self._end)
+        memory.load_line_edit(self._username, "inputs/tingsimple/username")
+        memory.load_line_edit(self._password, "inputs/tingsimple/password")
+        memory.load_line_edit(self._download_dir, "inputs/tingsimple/download_dir")
+        self._keytop_panel.load_input_memory()
+
+    def save_input_memory(self) -> None:
+        memory = input_memory()
+        memory.save_line_edit(self._username, "inputs/tingsimple/username")
+        memory.save_line_edit(self._password, "inputs/tingsimple/password")
+        memory.save_line_edit(self._download_dir, "inputs/tingsimple/download_dir")
+        self._keytop_panel.save_input_memory()
 
     def set_platform(self, platform: str) -> None:
         self._current_platform = platform
@@ -299,12 +371,9 @@ class DownloadTab(QWidget):
         self._username = make_inline_line_edit(ts.get("username", ""), "商户账号")
         self._password = make_inline_line_edit(ts.get("password", ""), "密码", password=True)
 
-        today = QDate.currentDate()
-        prev_month = today.addMonths(-1)
         self._start = make_inline_date_edit()
         self._end = make_inline_date_edit()
-        self._start.setDate(QDate(prev_month.year(), prev_month.month(), 2))
-        self._end.setDate(QDate(today.year(), today.month(), 1))
+        apply_default_query_dates(self._start, self._end)
 
         self._captcha_image = ClickableLabel("点击获取验证码")
         self._captcha_image.setObjectName("QrPlaceholder")
@@ -331,10 +400,10 @@ class DownloadTab(QWidget):
 
         date_section = GroupedSection("账期")
         date_section.add_row(
-            ListRow("开始日期", trailing=make_inline_slot(self._start), trailing_expand=True)
+            ListRow("开始日期", trailing=make_date_trailing(self._start), trailing_expand=True)
         )
         date_section.add_row(
-            ListRow("结束日期", trailing=make_inline_slot(self._end), trailing_expand=True, last=True)
+            ListRow("结束日期", trailing=make_date_trailing(self._end), trailing_expand=True, last=True)
         )
 
         login_section = GroupedSection("账号")
@@ -572,6 +641,8 @@ class DownloadTab(QWidget):
             self.download_dir_changed.emit(download_dir)
         parts = payload.split("|")
         path = parts[0] if parts else payload
+        if path:
+            self.download_file_changed.emit(path)
         summary = ""
         if len(parts) >= 5:
             summary = (
@@ -661,12 +732,14 @@ class DownloadTab(QWidget):
 
 class ProcessTab(QWidget):
     log_message = Signal(str)
+    process_file_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self._worker: Worker | None = None
         self._platform = "停简单"
+        self._last_output_paths: dict[str, str] = {}
         settings = load_settings()
         ts = settings.get("tingsimple", {})
         kt = settings.get("keytop", {})
@@ -683,10 +756,10 @@ class ProcessTab(QWidget):
 
         dir_trailing = make_path_trailing(self._dir_path, browse)
 
+        self._source_row = ListRow("对账源目录", trailing=dir_trailing, trailing_expand=True, last=True)
+
         source_section = GroupedSection("数据源")
-        source_section.add_row(
-            ListRow("对账源目录", trailing=dir_trailing, trailing_expand=True, last=True)
-        )
+        source_section.add_row(self._source_row)
 
         self._btn = QPushButton("整理对账数据")
         self._btn.setObjectName("PrimaryButton")
@@ -695,25 +768,78 @@ class ProcessTab(QWidget):
         action_bar.set_primary(self._btn)
 
         layout = make_page_layout(self)
-        layout.addWidget(
-            PageHeader("整理数据", "合并目录内 Excel 并输出对账结果。", compact=True)
-        )
+        self._page_header = PageHeader("整理数据", "合并目录内 Excel 并输出对账结果。", compact=True)
+        layout.addWidget(self._page_header)
         layout.addWidget(source_section)
         layout.addWidget(action_bar)
         layout.addStretch()
+        self.load_input_memory()
+
+    def _platform_slug(self) -> str:
+        return "keytop" if self._platform == "科拓" else "tingsimple"
+
+    def load_input_memory(self) -> None:
+        memory = input_memory()
+        default = self._default_dirs.get(self._platform, self._default_dirs["停简单"])
+        memory.load_line_edit(
+            self._dir_path, f"inputs/process/{self._platform_slug()}/source_path", default
+        )
+
+    def save_input_memory(self) -> None:
+        memory = input_memory()
+        memory.save_line_edit(self._dir_path, f"inputs/process/{self._platform_slug()}/source_path")
 
     def set_platform(self, platform: str) -> None:
+        if platform != self._platform:
+            self.save_input_memory()
         self._platform = platform
-        if not self._dir_path.text().strip() or self._dir_path.text() in self._default_dirs.values():
-            self._dir_path.setText(self._default_dirs.get(platform, self._default_dirs["停简单"]))
+        is_keytop = platform == "科拓"
+        self._source_row.findChild(QLabel, "ListRowLabel").setText(
+            "对账源文件" if is_keytop else "对账源目录"
+        )
+        self._dir_path.setPlaceholderText("选择 Excel…" if is_keytop else "选择目录…")
+        self._page_header.set_content(
+            "整理数据",
+            "合并文件内全部页签到单表，首列显示页签名称。"
+            if is_keytop
+            else "合并目录内 Excel 并输出对账结果。",
+        )
+        self.load_input_memory()
+
+    def last_output_path(self) -> str:
+        return self._last_output_paths.get(self._platform, "")
 
     def set_source_dir(self, path: str) -> None:
+        if not path.strip():
+            return
+        if self._platform == "科拓" and Path(path.strip()).is_dir():
+            return
+        self._dir_path.setText(path.strip())
+
+    def set_source_file(self, path: str) -> None:
         if path.strip():
             self._dir_path.setText(path.strip())
 
     def _browse(self) -> None:
         current = self._dir_path.text().strip()
-        start_dir = current if current and Path(current).exists() else str(Path.home() / "Downloads")
+        if self._platform == "科拓":
+            if current and Path(current).is_file():
+                start_dir = str(Path(current).parent)
+            elif current and Path(current).is_dir():
+                start_dir = current
+            else:
+                start_dir = self._default_dirs["科拓"]
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择科拓 Excel 文件",
+                start_dir,
+                "Excel 文件 (*.xlsx *.xls)",
+            )
+            if path:
+                self._dir_path.setText(path)
+            return
+
+        start_dir = current if current and Path(current).is_dir() else str(Path.home() / "Downloads")
         path = QFileDialog.getExistingDirectory(self, "选择对账源目录", start_dir)
         if path:
             self._dir_path.setText(path)
@@ -721,17 +847,26 @@ class ProcessTab(QWidget):
     def _on_process(self) -> None:
         path = self._dir_path.text().strip()
         if not path:
-            QMessageBox.warning(self, "提示", "请先选择对账源目录")
+            label = "对账源文件" if self._platform == "科拓" else "对账源目录"
+            QMessageBox.warning(self, "提示", f"请先选择{label}")
             return
-        if not Path(path).is_dir():
+        if self._platform == "科拓":
+            if not Path(path).is_file():
+                QMessageBox.warning(self, "提示", "源文件不存在，请重新选择")
+                return
+        elif not Path(path).is_dir():
             QMessageBox.warning(self, "提示", "源目录不存在，请重新选择")
             return
         if self._worker and self._worker.isRunning():
             return
 
         self._btn.setEnabled(False)
-        self.log_message.emit(f"开始整理目录: {path}")
-        self._worker = Worker("process", input_dir=path)
+        if self._platform == "科拓":
+            self.log_message.emit(f"开始整理文件: {path}")
+            self._worker = Worker("process", input_path=path, platform=self._platform)
+        else:
+            self.log_message.emit(f"开始整理目录: {path}")
+            self._worker = Worker("process", input_dir=path, platform=self._platform)
         self._worker.progress.connect(self.log_message.emit)
         self._worker.finished_ok.connect(self._on_ok)
         self._worker.finished_err.connect(self._on_err)
@@ -739,7 +874,9 @@ class ProcessTab(QWidget):
 
     def _on_ok(self, path: str) -> None:
         self._btn.setEnabled(True)
+        self._last_output_paths[self._platform] = path
         self.log_message.emit(f"✓ 整理完成: {path}")
+        self.process_file_changed.emit(path)
         QMessageBox.information(self, "完成", f"对账结果已保存:\n{path}")
 
     def _on_err(self, msg: str) -> None:
@@ -756,21 +893,87 @@ class VoucherTab(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self._worker: Worker | None = None
         self._platform = "停简单"
+        settings = load_settings()
+        voucher_cfg = settings.get("voucher", {})
+        kt_voucher = voucher_cfg.get("keytop", {})
+        ts_voucher = voucher_cfg.get("tingsimple", {})
+        self._default_account_mapping = str(
+            resolve_path(
+                ts_voucher.get("account_mapping_path")
+                or kt_voucher.get("account_mapping_path", "")
+            )
+        )
+        self._default_output_dir = str(
+            resolve_path(
+                ts_voucher.get("output_dir")
+                or kt_voucher.get("output_dir", "/Users/octopus/Downloads/凭证")
+            )
+        )
+
         self._file_path = make_path_field("", "选择 Excel…")
-        self._period = make_inline_line_edit("", "2026-05")
+        self._account_mapping_path = make_path_field(
+            self._default_account_mapping,
+            "选择 Excel…",
+        )
+        self._output_dir = make_path_field(
+            self._default_output_dir,
+            "选择目录…",
+        )
+        self._period = make_inline_line_edit("", default_voucher_period())
 
-        browse = QPushButton("浏览…")
-        browse.setObjectName("CompactButton")
-        browse.clicked.connect(self._browse)
+        source_browse = QPushButton("浏览…")
+        source_browse.setObjectName("CompactButton")
+        source_browse.clicked.connect(self._browse_source)
 
-        file_trailing = make_path_trailing(self._file_path, browse)
+        account_browse = QPushButton("浏览…")
+        account_browse.setObjectName("CompactButton")
+        account_browse.clicked.connect(self._browse_account_mapping)
+
+        output_browse = QPushButton("浏览…")
+        output_browse.setObjectName("CompactButton")
+        output_browse.clicked.connect(self._browse_output_dir)
+
+        self._source_row = ListRow(
+            "凭证源数据文件",
+            trailing=make_path_trailing(self._file_path, source_browse),
+            trailing_expand=True,
+        )
+        self._account_row = ListRow(
+            "项目对应收款账户信息",
+            trailing=make_path_trailing(self._account_mapping_path, account_browse),
+            trailing_expand=True,
+        )
+        self._output_row = ListRow(
+            "凭证生成目录",
+            trailing=make_path_trailing(self._output_dir, output_browse),
+            trailing_expand=True,
+        )
 
         input_section = GroupedSection("输入")
+        input_section.add_row(self._source_row)
+        input_section.add_row(self._account_row)
+        input_section.add_row(self._output_row)
         input_section.add_row(
-            ListRow("对账结果文件", trailing=file_trailing, trailing_expand=True)
+            ListRow("账期", trailing=make_inline_slot(self._period), trailing_expand=True)
         )
-        input_section.add_row(
-            ListRow("账期", trailing=make_inline_slot(self._period), trailing_expand=True, last=True)
+
+        self._unsettled_section = GroupedSection(
+            "未到账判断",
+            footer="按源数据「完成日期」划分：完成日期为空或不在本账期内的到账金额计入未到账凭证，其余计入银行存款凭证。",
+        )
+        self._unsettled_rule = QLabel(
+            "完成日期为空，或完成日期不在本账期内 → 未到账凭证"
+        )
+        self._unsettled_rule.setObjectName("StatusMuted")
+        self._unsettled_rule.setWordWrap(True)
+        self._unsettled_section.add_row(
+            ListRow(
+                "判断规则",
+                trailing=self._unsettled_rule,
+                trailing_expand=True,
+                last=True,
+                tall=True,
+            )
         )
 
         self._btn = QPushButton("生成 Excel 凭证")
@@ -780,43 +983,166 @@ class VoucherTab(QWidget):
         action_bar.set_primary(self._btn)
 
         layout = make_page_layout(self)
-        layout.addWidget(
-            PageHeader("生成凭证", "基于对账表生成 Excel 凭证。", compact=True)
+        self._page_header = PageHeader(
+            "生成凭证",
+            "按账期汇总源数据生成 Excel 凭证。",
+            compact=True,
         )
+        layout.addWidget(self._page_header)
         layout.addWidget(input_section)
+        layout.addWidget(self._unsettled_section)
         layout.addWidget(action_bar)
         layout.addStretch()
+        self.set_platform(self._platform)
+
+    def _platform_slug(self) -> str:
+        return "keytop" if self._platform == "科拓" else "tingsimple"
+
+    def load_input_memory(self) -> None:
+        memory = input_memory()
+        slug = self._platform_slug()
+        self._period.setText(default_voucher_period())
+        memory.load_line_edit(self._file_path, f"inputs/voucher/{slug}/source_file")
+        memory.load_line_edit(
+            self._account_mapping_path,
+            f"inputs/voucher/{slug}/account_mapping",
+            self._default_account_mapping,
+        )
+        memory.load_line_edit(
+            self._output_dir,
+            f"inputs/voucher/{slug}/output_dir",
+            self._default_output_dir,
+        )
+
+    def save_input_memory(self) -> None:
+        memory = input_memory()
+        slug = self._platform_slug()
+        memory.save_line_edit(self._file_path, f"inputs/voucher/{slug}/source_file")
+        memory.save_line_edit(
+            self._account_mapping_path, f"inputs/voucher/{slug}/account_mapping"
+        )
+        memory.save_line_edit(self._output_dir, f"inputs/voucher/{slug}/output_dir")
 
     def set_platform(self, platform: str) -> None:
+        if platform != self._platform:
+            self.save_input_memory()
         self._platform = platform
+        is_keytop = platform == "科拓"
+        self._page_header.set_content(
+            "生成凭证",
+            "按账期汇总源数据：手续费看交易日期，提现看入账日期，账期外行自动排除。"
+            if is_keytop
+            else "按账期汇总源数据；未到账按完成日期是否在本账期内判断。",
+        )
+        self._unsettled_section.setVisible(not is_keytop)
+        self.load_input_memory()
 
-    def _browse(self) -> None:
+    def set_source_file(self, path: str) -> None:
+        text = path.strip()
+        if not text:
+            return
+        self._file_path.setText(text)
+        input_memory().save_line_edit(
+            self._file_path, f"inputs/voucher/{self._platform_slug()}/source_file"
+        )
+
+    def _browse_source(self) -> None:
+        current = self._file_path.text().strip()
+        start_dir = str(Path(current).parent) if current and Path(current).is_file() else ""
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择对账结果", "", "Excel (*.xlsx *.xls)"
+            self,
+            "选择凭证源数据文件",
+            start_dir,
+            "Excel (*.xlsx *.xls)",
         )
         if path:
             self._file_path.setText(path)
 
+    def _browse_account_mapping(self) -> None:
+        current = self._account_mapping_path.text().strip()
+        start_dir = str(Path(current).parent) if current and Path(current).is_file() else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择项目对应收款账户信息",
+            start_dir,
+            "Excel (*.xlsx *.xls)",
+        )
+        if path:
+            self._account_mapping_path.setText(path)
+
+    def _browse_output_dir(self) -> None:
+        current = self._output_dir.text().strip()
+        start_dir = current if current and Path(current).is_dir() else str(Path.home() / "Downloads" / "凭证")
+        path = QFileDialog.getExistingDirectory(self, "选择凭证生成目录", start_dir)
+        if path:
+            self._output_dir.setText(path)
+
     def _on_generate(self) -> None:
         path = self._file_path.text().strip()
         if not path:
-            QMessageBox.warning(self, "提示", "请先选择对账结果文件")
+            QMessageBox.warning(self, "提示", "请先选择凭证源数据文件")
+            return
+        if not Path(path).is_file():
+            QMessageBox.warning(self, "提示", "凭证源数据文件不存在，请重新选择")
+            return
+        period = self._period.text().strip()
+        if not period:
+            QMessageBox.warning(self, "提示", "请填写账期")
             return
         if self._worker and self._worker.isRunning():
             return
 
+        kwargs: dict = {
+            "input_path": path,
+            "period": period,
+            "platform": self._platform,
+        }
+        account_mapping = self._account_mapping_path.text().strip()
+        output_dir = self._output_dir.text().strip()
+        if not account_mapping:
+            QMessageBox.warning(self, "提示", "请选择项目对应收款账户信息文件")
+            return
+        if not Path(account_mapping).is_file():
+            QMessageBox.warning(self, "提示", "项目对应收款账户信息文件不存在，请重新选择")
+            return
+        if not output_dir:
+            QMessageBox.warning(self, "提示", "请选择凭证生成目录")
+            return
+        kwargs["account_mapping_path"] = account_mapping
+        kwargs["output_dir"] = output_dir
+
         self._btn.setEnabled(False)
-        period = self._period.text().strip()
         self.log_message.emit(f"开始生成凭证: {path}")
-        self._worker = Worker("voucher", input_path=path, period=period)
+        self._worker = Worker("voucher", **kwargs)
+        self._worker.progress.connect(self.log_message.emit)
         self._worker.finished_ok.connect(self._on_ok)
         self._worker.finished_err.connect(self._on_err)
         self._worker.start()
 
-    def _on_ok(self, path: str) -> None:
+    def _on_ok(self, payload: str) -> None:
         self._btn.setEnabled(True)
-        self.log_message.emit(f"✓ 凭证已生成: {path}")
-        QMessageBox.information(self, "完成", f"凭证文件:\n{path}")
+        parts = payload.split("|")
+        if len(parts) >= 3 and self._platform == "停简单":
+            self.log_message.emit(f"✓ 未到账凭证: {parts[0]}")
+            self.log_message.emit(f"✓ 手续费凭证: {parts[1]}")
+            self.log_message.emit(f"✓ 银行存款凭证: {parts[2]}")
+            QMessageBox.information(
+                self,
+                "完成",
+                f"凭证已生成:\n\n未到账:\n{parts[0]}\n\n手续费:\n{parts[1]}\n\n银行存款:\n{parts[2]}",
+            )
+            return
+        if len(parts) >= 2:
+            self.log_message.emit(f"✓ 手续费凭证: {parts[0]}")
+            self.log_message.emit(f"✓ 提现凭证: {parts[1]}")
+            QMessageBox.information(
+                self,
+                "完成",
+                f"凭证已生成:\n\n手续费:\n{parts[0]}\n\n提现:\n{parts[1]}",
+            )
+            return
+        self.log_message.emit(f"✓ 凭证已生成: {payload}")
+        QMessageBox.information(self, "完成", f"凭证文件:\n{payload}")
 
     def _on_err(self, msg: str) -> None:
         self._btn.setEnabled(True)
