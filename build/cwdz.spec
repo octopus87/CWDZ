@@ -14,6 +14,7 @@ DISPLAY_NAME = "财务对账工具"
 datas = [
     (str(ROOT / "config" / "settings.yaml"), "config"),
     (str(ROOT / "config" / "local.yaml.example"), "config"),
+    (str(ROOT / "config" / "voucher"), "config/voucher"),
 ]
 # ddddocr 验证码模型（.onnx 不会随 hiddenimports 自动打入）
 _ddddocr_datas = collect_data_files("ddddocr", includes=["*.onnx"])

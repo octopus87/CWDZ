@@ -136,7 +136,7 @@ class KeytopDownloadPanel(QWidget):
             ListRow("结束日期", trailing=make_date_trailing(self._end), trailing_expand=True, last=True)
         )
 
-        default_task = "/Users/octopus/Downloads/科拓代扣4.29-6.1.xlsx"
+        default_task = ""
         self._default_task = default_task
         self._task_file = make_path_field(default_task)
         task_browse_btn = QPushButton("浏览…")
@@ -149,7 +149,9 @@ class KeytopDownloadPanel(QWidget):
             ListRow("批量任务文件", trailing=task_trailing, trailing_expand=True, last=True)
         )
 
-        default_dir = str(resolve_path(kt.get("download_dir", "/Users/octopus/Downloads/科拓")))
+        default_dir = str(
+            resolve_path(kt.get("download_dir", "data/downloads/keytop"), platform="keytop")
+        )
         self._default_download_dir = default_dir
         self._download_dir = make_path_field(default_dir)
         browse_btn = QPushButton("浏览…")

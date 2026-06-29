@@ -47,7 +47,7 @@ from cwdz.app.widgets.apple_ui import (
     make_path_trailing,
     make_trailing_bar,
 )
-from cwdz.config import load_settings, resolve_path
+from cwdz.config import load_settings, resolve_path, resolve_resource_path
 from cwdz.crawler.keytop.batch import download_batch_workbook
 from cwdz.crawler.keytop.client import KeytopClient
 from cwdz.crawler.session import TingsimpleClient
@@ -190,9 +190,9 @@ class Worker(QThread):
                     kt_voucher = settings.get("voucher", {}).get("keytop", {})
                     result = generate_keytop_vouchers(
                         Path(self.kwargs["input_path"]),
-                        Path(self.kwargs["account_mapping_path"]),
-                        resolve_path(kt_voucher["fee_template_path"]),
-                        resolve_path(kt_voucher["withdrawal_template_path"]),
+                        resolve_resource_path(kt_voucher["account_mapping_path"]),
+                        resolve_resource_path(kt_voucher["fee_template_path"]),
+                        resolve_resource_path(kt_voucher["withdrawal_template_path"]),
                         Path(self.kwargs["output_dir"]),
                         period=period,
                         on_progress=self.progress.emit,
@@ -203,10 +203,10 @@ class Worker(QThread):
                     ts_voucher = settings.get("voucher", {}).get("tingsimple", {})
                     result = generate_tingsimple_vouchers(
                         Path(self.kwargs["input_path"]),
-                        Path(self.kwargs["account_mapping_path"]),
-                        resolve_path(ts_voucher["unsettled_template_path"]),
-                        resolve_path(ts_voucher["fee_template_path"]),
-                        resolve_path(ts_voucher["bank_template_path"]),
+                        resolve_resource_path(ts_voucher["account_mapping_path"]),
+                        resolve_resource_path(ts_voucher["unsettled_template_path"]),
+                        resolve_resource_path(ts_voucher["fee_template_path"]),
+                        resolve_resource_path(ts_voucher["bank_template_path"]),
                         Path(self.kwargs["output_dir"]),
                         period=period,
                         on_progress=self.progress.emit,
@@ -391,7 +391,9 @@ class DownloadTab(QWidget):
         )
         self._captcha_input.setMaxLength(8)
 
-        default_dir = str(resolve_path(ts.get("download_dir", "/Users/octopus/Downloads")))
+        default_dir = str(
+            resolve_path(ts.get("download_dir", "data/downloads"), platform="tingsimple")
+        )
         self._download_dir = make_path_field(default_dir, "选择目录…")
         browse_btn = QPushButton("浏览…")
         browse_btn.setObjectName("CompactButton")
@@ -744,8 +746,12 @@ class ProcessTab(QWidget):
         ts = settings.get("tingsimple", {})
         kt = settings.get("keytop", {})
         self._default_dirs = {
-            "停简单": str(resolve_path(ts.get("download_dir", "/Users/octopus/Downloads"))),
-            "科拓": str(resolve_path(kt.get("download_dir", "/Users/octopus/Downloads/科拓"))),
+            "停简单": str(
+                resolve_path(ts.get("download_dir", "data/downloads"), platform="tingsimple")
+            ),
+            "科拓": str(
+                resolve_path(kt.get("download_dir", "data/downloads/keytop"), platform="keytop")
+            ),
         }
 
         self._dir_path = make_path_field(self._default_dirs["停简单"], "选择目录…")
@@ -897,24 +903,14 @@ class VoucherTab(QWidget):
         voucher_cfg = settings.get("voucher", {})
         kt_voucher = voucher_cfg.get("keytop", {})
         ts_voucher = voucher_cfg.get("tingsimple", {})
-        self._default_account_mapping = str(
-            resolve_path(
-                ts_voucher.get("account_mapping_path")
-                or kt_voucher.get("account_mapping_path", "")
-            )
-        )
         self._default_output_dir = str(
             resolve_path(
                 ts_voucher.get("output_dir")
-                or kt_voucher.get("output_dir", "/Users/octopus/Downloads/凭证")
+                or kt_voucher.get("output_dir", "data/output/vouchers")
             )
         )
 
         self._file_path = make_path_field("", "选择 Excel…")
-        self._account_mapping_path = make_path_field(
-            self._default_account_mapping,
-            "选择 Excel…",
-        )
         self._output_dir = make_path_field(
             self._default_output_dir,
             "选择目录…",
@@ -925,10 +921,6 @@ class VoucherTab(QWidget):
         source_browse.setObjectName("CompactButton")
         source_browse.clicked.connect(self._browse_source)
 
-        account_browse = QPushButton("浏览…")
-        account_browse.setObjectName("CompactButton")
-        account_browse.clicked.connect(self._browse_account_mapping)
-
         output_browse = QPushButton("浏览…")
         output_browse.setObjectName("CompactButton")
         output_browse.clicked.connect(self._browse_output_dir)
@@ -936,11 +928,6 @@ class VoucherTab(QWidget):
         self._source_row = ListRow(
             "凭证源数据文件",
             trailing=make_path_trailing(self._file_path, source_browse),
-            trailing_expand=True,
-        )
-        self._account_row = ListRow(
-            "项目对应收款账户信息",
-            trailing=make_path_trailing(self._account_mapping_path, account_browse),
             trailing_expand=True,
         )
         self._output_row = ListRow(
@@ -951,7 +938,6 @@ class VoucherTab(QWidget):
 
         input_section = GroupedSection("输入")
         input_section.add_row(self._source_row)
-        input_section.add_row(self._account_row)
         input_section.add_row(self._output_row)
         input_section.add_row(
             ListRow("账期", trailing=make_inline_slot(self._period), trailing_expand=True)
@@ -1003,24 +989,24 @@ class VoucherTab(QWidget):
         slug = self._platform_slug()
         self._period.setText(default_voucher_period())
         memory.load_line_edit(self._file_path, f"inputs/voucher/{slug}/source_file")
-        memory.load_line_edit(
-            self._account_mapping_path,
-            f"inputs/voucher/{slug}/account_mapping",
-            self._default_account_mapping,
+        default_output = str(
+            resolve_path(
+                load_settings()
+                .get("voucher", {})
+                .get(slug, {})
+                .get("output_dir", "data/output/vouchers")
+            )
         )
         memory.load_line_edit(
             self._output_dir,
             f"inputs/voucher/{slug}/output_dir",
-            self._default_output_dir,
+            default_output,
         )
 
     def save_input_memory(self) -> None:
         memory = input_memory()
         slug = self._platform_slug()
         memory.save_line_edit(self._file_path, f"inputs/voucher/{slug}/source_file")
-        memory.save_line_edit(
-            self._account_mapping_path, f"inputs/voucher/{slug}/account_mapping"
-        )
         memory.save_line_edit(self._output_dir, f"inputs/voucher/{slug}/output_dir")
 
     def set_platform(self, platform: str) -> None:
@@ -1030,9 +1016,9 @@ class VoucherTab(QWidget):
         is_keytop = platform == "科拓"
         self._page_header.set_content(
             "生成凭证",
-            "按账期汇总源数据：手续费看交易日期，提现看入账日期，账期外行自动排除。"
+            "按账期汇总源数据：手续费看交易日期，提现看入账日期，账期外行自动排除；凭证模板已内置。"
             if is_keytop
-            else "按账期汇总源数据；未到账按完成日期是否在本账期内判断。",
+            else "按账期汇总源数据；凭证模板与项目映射已内置，无需本地配置。",
         )
         self._unsettled_section.setVisible(not is_keytop)
         self.load_input_memory()
@@ -1057,18 +1043,6 @@ class VoucherTab(QWidget):
         )
         if path:
             self._file_path.setText(path)
-
-    def _browse_account_mapping(self) -> None:
-        current = self._account_mapping_path.text().strip()
-        start_dir = str(Path(current).parent) if current and Path(current).is_file() else ""
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择项目对应收款账户信息",
-            start_dir,
-            "Excel (*.xlsx *.xls)",
-        )
-        if path:
-            self._account_mapping_path.setText(path)
 
     def _browse_output_dir(self) -> None:
         current = self._output_dir.text().strip()
@@ -1097,18 +1071,10 @@ class VoucherTab(QWidget):
             "period": period,
             "platform": self._platform,
         }
-        account_mapping = self._account_mapping_path.text().strip()
         output_dir = self._output_dir.text().strip()
-        if not account_mapping:
-            QMessageBox.warning(self, "提示", "请选择项目对应收款账户信息文件")
-            return
-        if not Path(account_mapping).is_file():
-            QMessageBox.warning(self, "提示", "项目对应收款账户信息文件不存在，请重新选择")
-            return
         if not output_dir:
             QMessageBox.warning(self, "提示", "请选择凭证生成目录")
             return
-        kwargs["account_mapping_path"] = account_mapping
         kwargs["output_dir"] = output_dir
 
         self._btn.setEnabled(False)

@@ -2,35 +2,34 @@
 tingsimple:
   base_url: "https://open.tingjiandan.com/bmp-web/"
   login_url: "https://open.tingjiandan.com/bmp-web/"
-  download_dir: "/Users/octopus/Downloads"
+  download_dir: "data/downloads"
 
 # 科拓平台
 keytop:
   login_url: "https://park.keytop.cn/unityp/login"
-  download_dir: "/Users/octopus/Downloads/科拓"
+  download_dir: "data/downloads/keytop"
   auth_state_path: "data/.auth/keytop.json"
   qr_expire_days: 30
   login_timeout: 180
 
-# 对账与凭证
+# 对账与凭证（路径均相对数据根目录：Windows 默认 D:/CWDZ，macOS 为程序目录）
 reconcile:
-  input_dir: "/Users/octopus/Downloads"
+  input_dir: "data/downloads"
   output_dir: "data/output"
 
 voucher:
-  template_path: "voucher/template.xlsx"
   output_dir: "data/output/vouchers"
   tingsimple:
-    account_mapping_path: "/Users/octopus/Downloads/停简单凭证/项目对应收款账户信息.xlsx"
-    unsettled_template_path: "/Users/octopus/Downloads/停简单凭证/代扣结算未到账凭证.xlsx"
-    fee_template_path: "/Users/octopus/Downloads/停简单凭证/代扣结算已到账凭证.xlsx"
-    bank_template_path: "/Users/octopus/Downloads/停简单凭证/银行存款凭证.xlsx"
-    output_dir: "/Users/octopus/Downloads/停简单凭证"
+    account_mapping_path: "config/voucher/tingsimple/account_mapping.xlsx"
+    unsettled_template_path: "config/voucher/tingsimple/unsettled_template.xlsx"
+    fee_template_path: "config/voucher/tingsimple/fee_template.xlsx"
+    bank_template_path: "config/voucher/tingsimple/bank_template.xlsx"
+    output_dir: "data/output/vouchers/tingsimple"
   keytop:
-    account_mapping_path: "/Users/octopus/Downloads/凭证/凭证导入-项目对应收款账户信息.xlsx"
-    fee_template_path: "/Users/octopus/Downloads/凭证/凭证模版-科拓手续费.xlsx"
-    withdrawal_template_path: "/Users/octopus/Downloads/凭证/凭证模版-科拓提现.xlsx"
-    output_dir: "/Users/octopus/Downloads/凭证"
+    account_mapping_path: "config/voucher/keytop/account_mapping.xlsx"
+    fee_template_path: "config/voucher/keytop/fee_template.xlsx"
+    withdrawal_template_path: "config/voucher/keytop/withdrawal_template.xlsx"
+    output_dir: "data/output/vouchers/keytop"
 
 # 下载方式: api（推荐）或 browser
 download:

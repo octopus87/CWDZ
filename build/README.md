@@ -29,8 +29,9 @@ build\build.bat
 ## 配置
 
 - 默认配置：`config/settings.yaml`（已打入安装包）
+- 凭证模板与项目映射：`config/voucher/`（停简单 / 科拓，已打入安装包，生成凭证时自动使用）
 - 本地覆盖：在程序目录下 `config/local.yaml`（可复制 `local.yaml.example` 后修改账号、路径）
-- 登录状态与下载文件：程序目录下 `data/`（首次运行自动创建）
+- 数据目录：Windows 默认 `D:/CWDZ/`（下载、对账结果、凭证输出）；macOS 为程序目录下 `data/`
 
 ## 体积说明
 

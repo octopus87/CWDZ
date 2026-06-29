@@ -1,4 +1,7 @@
 # 复制为 local.yaml 并填写真实账号（local.yaml 已在 .gitignore 中）
+# 路径使用相对路径（如 data/downloads）即可：
+#   Windows 默认解析为 D:/CWDZ/data/downloads
+#   macOS 默认解析为程序目录下 data/downloads
 tingsimple:
   username: "your_username"
   password: "your_password"
@@ -7,3 +10,6 @@ tingsimple:
 # tingsimple:
 #   username: "yghtcw"
 #   password: "yghtcw123!"
+#   download_dir: "data/downloads"
+# keytop:
+#   download_dir: "data/downloads/keytop"
