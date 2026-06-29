@@ -8,12 +8,16 @@ import yaml
 from cwdz.paths import (
     app_root,
     bundle_root,
+    default_browse_dir,
     default_download_dir,
     default_reconcile_output_dir,
     default_voucher_output_dir,
     is_unusable_absolute,
+    is_windows,
+    is_windows_absolute,
     join_relative,
     resolve_under,
+    sanitize_file_path,
     sanitize_writable_path,
     writable_root,
 )
@@ -55,6 +59,8 @@ def resolve_path(relative: str, *, platform: str = "tingsimple") -> Path:
         return default_download_dir(platform)
     if is_unusable_absolute(text):
         return default_download_dir(platform)
+    if is_windows() and is_windows_absolute(text):
+        return Path(text)
     path = Path(text)
     if path.is_absolute():
         return path
@@ -80,6 +86,35 @@ def resolve_resource_path(relative: str) -> Path:
     raise FileNotFoundError(
         f"资源文件不存在: {text}\n已查找:\n  {local}\n  {bundled}"
     )
+
+
+def user_account_mapping_path(platform: str = "tingsimple") -> Path:
+    """用户上传/覆盖的公司对照表（可写数据目录）。"""
+    return resolve_under(writable_root(), f"data/voucher/{platform}/account_mapping.xlsx")
+
+
+def default_account_mapping_path(platform: str = "tingsimple") -> Path:
+    """内置默认公司对照表。"""
+    settings = load_settings()
+    rel = (
+        settings.get("voucher", {})
+        .get(platform, {})
+        .get("account_mapping_path", f"config/voucher/{platform}/account_mapping.xlsx")
+    )
+    return resolve_resource_path(rel)
+
+
+def resolve_account_mapping_path(platform: str, path_text: str = "") -> Path:
+    """解析实际使用的公司对照表：界面路径 → 用户上传副本 → 内置默认。"""
+    text = sanitize_file_path(path_text)
+    if text:
+        candidate = Path(text)
+        if candidate.is_file():
+            return candidate
+    user_copy = user_account_mapping_path(platform)
+    if user_copy.is_file():
+        return user_copy
+    return default_account_mapping_path(platform)
 
 
 # 供外部模块统一调用（sanitize_writable_path 定义在 cwdz.paths）

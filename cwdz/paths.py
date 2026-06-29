@@ -42,14 +42,14 @@ def is_windows() -> bool:
 
 
 def writable_root() -> Path:
-    """可读写数据根目录：Windows 默认 D:/CWDZ，macOS / 开发环境为程序目录。"""
+    """可读写数据根目录：Windows 优先 D:/CWDZ，其次 C:/CWDZ；macOS / 开发环境为程序目录。"""
     if is_windows():
-        root = Path("D:/CWDZ")
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-            return root
-        except OSError:
-            pass
+        for candidate in (Path("D:/CWDZ"), Path("C:/CWDZ")):
+            try:
+                candidate.mkdir(parents=True, exist_ok=True)
+                return candidate
+            except OSError:
+                continue
     return app_root()
 
 
@@ -138,6 +138,49 @@ def sanitize_writable_path(
     return resolve_under(writable_root(), text)
 
 
+def sanitize_file_path(path_text: str) -> str:
+    """清除 QSettings 等来源中在当前系统不可用的文件路径（如 Mac 绝对路径）。"""
+    text = (path_text or "").strip()
+    if not text or is_unusable_absolute(text):
+        return ""
+    if is_windows() and is_windows_absolute(text):
+        return text
+    path = Path(text)
+    if path.is_absolute():
+        return text
+    return text
+
+
+def default_browse_dir(
+    current: str = "",
+    *,
+    platform: str = "tingsimple",
+    purpose: str = "download",
+) -> str:
+    """文件/目录选择对话框的起始路径（Windows 默认 D:/CWDZ 下对应 data 子目录）。"""
+    text = (current or "").strip()
+    if text and not is_unusable_absolute(text):
+        path = Path(text)
+        if path.is_file():
+            parent = path.parent
+            if parent.is_dir():
+                return str(parent)
+        if path.is_dir():
+            return str(path)
+        parent = path.parent
+        if parent.is_dir():
+            return str(parent)
+    if purpose == "voucher":
+        return str(default_voucher_output_dir(platform))
+    if purpose == "output":
+        return str(default_reconcile_output_dir())
+    if purpose == "save":
+        export_dir = writable_root() / "data" / "export"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        return str(export_dir)
+    return str(default_download_dir(platform))
+
+
 def ensure_voucher_assets() -> None:
     """首次运行时将 bundle 内凭证模板释放到程序目录（Windows 下与 exe 同目录）。"""
     src_root = bundle_root() / "config" / "voucher"
@@ -165,6 +208,10 @@ def ensure_runtime_dirs() -> None:
         "data/output/vouchers",
         "data/output/vouchers/tingsimple",
         "data/output/vouchers/keytop",
+        "data/voucher",
+        "data/voucher/tingsimple",
+        "data/voucher/keytop",
+        "data/export",
     ):
         (data_root / rel).mkdir(parents=True, exist_ok=True)
     for rel in ("config", "config/voucher/tingsimple", "config/voucher/keytop"):

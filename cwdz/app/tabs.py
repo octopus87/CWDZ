@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import traceback
 from datetime import date, datetime
 from pathlib import Path
@@ -47,7 +48,17 @@ from cwdz.app.widgets.apple_ui import (
     make_path_trailing,
     make_trailing_bar,
 )
-from cwdz.config import load_settings, resolve_path, resolve_resource_path, sanitize_writable_path
+from cwdz.config import (
+    default_browse_dir,
+    is_unusable_absolute,
+    load_settings,
+    resolve_account_mapping_path,
+    resolve_path,
+    resolve_resource_path,
+    sanitize_file_path,
+    sanitize_writable_path,
+    user_account_mapping_path,
+)
 from cwdz.crawler.keytop.batch import download_batch_workbook
 from cwdz.crawler.keytop.client import KeytopClient
 from cwdz.crawler.session import TingsimpleClient
@@ -203,12 +214,16 @@ class Worker(QThread):
                     platform=platform_slug,
                     purpose="voucher",
                 )
+                account_mapping = resolve_account_mapping_path(
+                    platform_slug,
+                    self.kwargs.get("account_mapping_path", ""),
+                )
                 if platform == "科拓":
                     settings = load_settings()
                     kt_voucher = settings.get("voucher", {}).get("keytop", {})
                     result = generate_keytop_vouchers(
                         Path(self.kwargs["input_path"]),
-                        resolve_resource_path(kt_voucher["account_mapping_path"]),
+                        account_mapping,
                         resolve_resource_path(kt_voucher["fee_template_path"]),
                         resolve_resource_path(kt_voucher["withdrawal_template_path"]),
                         output_dir,
@@ -221,7 +236,7 @@ class Worker(QThread):
                     ts_voucher = settings.get("voucher", {}).get("tingsimple", {})
                     result = generate_tingsimple_vouchers(
                         Path(self.kwargs["input_path"]),
-                        resolve_resource_path(ts_voucher["account_mapping_path"]),
+                        account_mapping,
                         resolve_resource_path(ts_voucher["unsettled_template_path"]),
                         resolve_resource_path(ts_voucher["fee_template_path"]),
                         resolve_resource_path(ts_voucher["bank_template_path"]),
@@ -496,7 +511,9 @@ class DownloadTab(QWidget):
 
     def _browse_download_dir(self) -> None:
         current = self._download_dir.text().strip()
-        start_dir = current if current and Path(current).exists() else str(Path.home() / "Downloads")
+        start_dir = default_browse_dir(
+            current, platform="tingsimple", purpose="download"
+        )
         path = QFileDialog.getExistingDirectory(self, "选择下载目录", start_dir)
         if path:
             self._download_dir.setText(path)
@@ -813,10 +830,14 @@ class ProcessTab(QWidget):
             self._dir_path, f"inputs/process/{self._platform_slug()}/source_path", default
         )
         slug = self._platform_slug()
-        resolved = sanitize_writable_path(
-            self._dir_path.text(), platform=slug, purpose="download"
-        )
-        self._dir_path.setText(str(resolved))
+        if slug == "keytop":
+            cleaned = sanitize_file_path(self._dir_path.text())
+            self._dir_path.setText(cleaned or default)
+        else:
+            resolved = sanitize_writable_path(
+                self._dir_path.text(), platform=slug, purpose="download"
+            )
+            self._dir_path.setText(str(resolved))
 
     def save_input_memory(self) -> None:
         memory = input_memory()
@@ -856,12 +877,9 @@ class ProcessTab(QWidget):
     def _browse(self) -> None:
         current = self._dir_path.text().strip()
         if self._platform == "科拓":
-            if current and Path(current).is_file():
-                start_dir = str(Path(current).parent)
-            elif current and Path(current).is_dir():
-                start_dir = current
-            else:
-                start_dir = self._default_dirs["科拓"]
+            start_dir = default_browse_dir(
+                current, platform="keytop", purpose="download"
+            )
             path, _ = QFileDialog.getOpenFileName(
                 self,
                 "选择科拓 Excel 文件",
@@ -872,7 +890,9 @@ class ProcessTab(QWidget):
                 self._dir_path.setText(path)
             return
 
-        start_dir = current if current and Path(current).is_dir() else str(Path.home() / "Downloads")
+        start_dir = default_browse_dir(
+            current, platform=self._platform_slug(), purpose="download"
+        )
         path = QFileDialog.getExistingDirectory(self, "选择对账源目录", start_dir)
         if path:
             self._dir_path.setText(path)
@@ -938,6 +958,7 @@ class VoucherTab(QWidget):
         )
 
         self._file_path = make_path_field("", "选择 Excel…")
+        self._account_mapping_path = make_path_field("", "内置默认")
         self._output_dir = make_path_field(
             self._default_output_dir,
             "选择目录…",
@@ -948,6 +969,16 @@ class VoucherTab(QWidget):
         source_browse.setObjectName("CompactButton")
         source_browse.clicked.connect(self._browse_source)
 
+        account_download = QPushButton("下载…")
+        account_download.setObjectName("CompactButton")
+        account_download.setFixedHeight(COMPACT_BUTTON_HEIGHT)
+        account_download.clicked.connect(self._download_account_mapping)
+
+        account_upload = QPushButton("上传…")
+        account_upload.setObjectName("CompactButton")
+        account_upload.setFixedHeight(COMPACT_BUTTON_HEIGHT)
+        account_upload.clicked.connect(self._upload_account_mapping)
+
         output_browse = QPushButton("浏览…")
         output_browse.setObjectName("CompactButton")
         output_browse.clicked.connect(self._browse_output_dir)
@@ -957,14 +988,27 @@ class VoucherTab(QWidget):
             trailing=make_path_trailing(self._file_path, source_browse),
             trailing_expand=True,
         )
+        self._account_row = ListRow(
+            "公司对照信息",
+            trailing=make_trailing_bar(
+                (self._account_mapping_path, 1),
+                (account_download, 0),
+                (account_upload, 0),
+            ),
+            trailing_expand=True,
+        )
         self._output_row = ListRow(
             "凭证生成目录",
             trailing=make_path_trailing(self._output_dir, output_browse),
             trailing_expand=True,
         )
 
-        input_section = GroupedSection("输入")
+        input_section = GroupedSection(
+            "输入",
+            footer="公司对照信息默认使用内置模板；可下载当前版本，修改后重新上传覆盖。",
+        )
         input_section.add_row(self._source_row)
+        input_section.add_row(self._account_row)
         input_section.add_row(self._output_row)
         input_section.add_row(
             ListRow("账期", trailing=make_inline_slot(self._period), trailing_expand=True)
@@ -1016,6 +1060,14 @@ class VoucherTab(QWidget):
         slug = self._platform_slug()
         self._period.setText(default_voucher_period())
         memory.load_line_edit(self._file_path, f"inputs/voucher/{slug}/source_file")
+        self._file_path.setText(sanitize_file_path(self._file_path.text()))
+        memory.load_line_edit(
+            self._account_mapping_path,
+            f"inputs/voucher/{slug}/account_mapping",
+            "",
+        )
+        if is_unusable_absolute(self._account_mapping_path.text()):
+            self._account_mapping_path.clear()
         default_output = str(
             resolve_path(
                 load_settings()
@@ -1033,11 +1085,20 @@ class VoucherTab(QWidget):
             self._output_dir.text(), platform=slug, purpose="voucher"
         )
         self._output_dir.setText(str(resolved))
+        self._refresh_account_mapping_display()
+
+    def _refresh_account_mapping_display(self) -> None:
+        slug = self._platform_slug()
+        effective = resolve_account_mapping_path(slug, self._account_mapping_path.text())
+        self._account_mapping_path.setText(str(effective))
 
     def save_input_memory(self) -> None:
         memory = input_memory()
         slug = self._platform_slug()
         memory.save_line_edit(self._file_path, f"inputs/voucher/{slug}/source_file")
+        memory.save_line_edit(
+            self._account_mapping_path, f"inputs/voucher/{slug}/account_mapping"
+        )
         memory.save_line_edit(self._output_dir, f"inputs/voucher/{slug}/output_dir")
 
     def set_platform(self, platform: str) -> None:
@@ -1047,9 +1108,9 @@ class VoucherTab(QWidget):
         is_keytop = platform == "科拓"
         self._page_header.set_content(
             "生成凭证",
-            "按账期汇总源数据：手续费看交易日期，提现看入账日期，账期外行自动排除；凭证模板已内置。"
+            "按账期汇总源数据：手续费看交易日期，提现看入账日期，账期外行自动排除；公司对照可下载修改后上传。"
             if is_keytop
-            else "按账期汇总源数据；凭证模板与项目映射已内置，无需本地配置。",
+            else "按账期汇总源数据；未到账按完成日期判断；公司对照可下载修改后上传。",
         )
         self._unsettled_section.setVisible(not is_keytop)
         self.load_input_memory()
@@ -1065,7 +1126,7 @@ class VoucherTab(QWidget):
 
     def _browse_source(self) -> None:
         current = self._file_path.text().strip()
-        start_dir = str(Path(current).parent) if current and Path(current).is_file() else ""
+        start_dir = default_browse_dir(current, purpose="output")
         path, _ = QFileDialog.getOpenFileName(
             self,
             "选择凭证源数据文件",
@@ -1074,6 +1135,63 @@ class VoucherTab(QWidget):
         )
         if path:
             self._file_path.setText(path)
+
+    def _download_account_mapping(self) -> None:
+        slug = self._platform_slug()
+        src = resolve_account_mapping_path(slug, self._account_mapping_path.text())
+        if not src.is_file():
+            QMessageBox.warning(self, "提示", "当前没有可用的公司对照信息文件")
+            return
+        label = "停简单" if slug == "tingsimple" else "科拓"
+        default_name = f"公司对照信息_{label}.xlsx"
+        start_dir = default_browse_dir(platform=slug, purpose="save")
+        dest, _ = QFileDialog.getSaveFileName(
+            self,
+            "下载公司对照信息",
+            str(Path(start_dir) / default_name),
+            "Excel (*.xlsx)",
+        )
+        if not dest:
+            return
+        try:
+            Path(dest).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+        except OSError as exc:
+            QMessageBox.critical(self, "错误", f"下载失败:\n{exc}")
+            return
+        self.log_message.emit(f"✓ 已下载公司对照信息: {dest}")
+        QMessageBox.information(
+            self,
+            "完成",
+            f"公司对照信息已保存到:\n{dest}\n\n修改后可点击「上传…」重新导入。",
+        )
+
+    def _upload_account_mapping(self) -> None:
+        slug = self._platform_slug()
+        start_dir = default_browse_dir(
+            self._account_mapping_path.text(), platform=slug, purpose="save"
+        )
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "上传公司对照信息",
+            start_dir,
+            "Excel (*.xlsx *.xls)",
+        )
+        if not path:
+            return
+        dest = user_account_mapping_path(slug)
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, dest)
+        except OSError as exc:
+            QMessageBox.critical(self, "错误", f"上传失败:\n{exc}")
+            return
+        self._account_mapping_path.setText(str(dest))
+        input_memory().save_line_edit(
+            self._account_mapping_path, f"inputs/voucher/{slug}/account_mapping"
+        )
+        self.log_message.emit(f"✓ 已更新公司对照信息: {dest}")
+        QMessageBox.information(self, "完成", f"公司对照信息已更新:\n{dest}")
 
     def _browse_output_dir(self) -> None:
         current = self._output_dir.text().strip()
@@ -1104,10 +1222,21 @@ class VoucherTab(QWidget):
             "period": period,
             "platform": self._platform,
         }
+        account_mapping = self._account_mapping_path.text().strip()
         output_dir = self._output_dir.text().strip()
+        if not account_mapping:
+            QMessageBox.warning(self, "提示", "公司对照信息不可用，请先下载或上传")
+            return
+        effective_mapping = resolve_account_mapping_path(
+            self._platform_slug(), account_mapping
+        )
+        if not effective_mapping.is_file():
+            QMessageBox.warning(self, "提示", "公司对照信息文件不存在，请重新上传")
+            return
         if not output_dir:
             QMessageBox.warning(self, "提示", "请选择凭证生成目录")
             return
+        kwargs["account_mapping_path"] = str(effective_mapping)
         kwargs["output_dir"] = output_dir
 
         self._btn.setEnabled(False)

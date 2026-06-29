@@ -32,7 +32,7 @@ from cwdz.app.widgets.apple_ui import (
     make_path_field,
     make_path_trailing,
 )
-from cwdz.config import load_settings, resolve_path, sanitize_writable_path
+from cwdz.config import default_browse_dir, load_settings, resolve_path, sanitize_file_path, sanitize_writable_path
 
 QR_SIZE = 116
 
@@ -187,6 +187,7 @@ class KeytopDownloadPanel(QWidget):
         memory = input_memory()
         apply_default_keytop_query_dates(self._start, self._end)
         memory.load_line_edit(self._task_file, "inputs/keytop/task_file", self._default_task)
+        self._task_file.setText(sanitize_file_path(self._task_file.text()) or self._default_task)
         memory.load_line_edit(
             self._download_dir, "inputs/keytop/download_dir", self._default_download_dir
         )
@@ -263,19 +264,15 @@ class KeytopDownloadPanel(QWidget):
 
     def _browse_download_dir(self) -> None:
         current = self._download_dir.text().strip()
-        start_dir = current if current and Path(current).exists() else str(Path.home() / "Downloads")
+        start_dir = default_browse_dir(current, platform="keytop", purpose="download")
         path = QFileDialog.getExistingDirectory(self, "选择下载目录", start_dir)
         if path:
             self._download_dir.setText(path)
 
     def _browse_task_file(self) -> None:
         current = self._task_file.text().strip()
-        if current and Path(current).exists():
-            start_dir = str(Path(current).parent)
-            start_file = current
-        else:
-            start_dir = str(Path.home() / "Downloads")
-            start_file = ""
+        start_dir = default_browse_dir(current, platform="keytop", purpose="download")
+        start_file = current if current and Path(current).is_file() else ""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "选择批量任务 Excel",
