@@ -9,10 +9,12 @@ from cwdz.paths import (
     app_root,
     bundle_root,
     default_download_dir,
+    default_reconcile_output_dir,
     default_voucher_output_dir,
     is_unusable_absolute,
     join_relative,
     resolve_under,
+    sanitize_writable_path,
     writable_root,
 )
 
@@ -78,3 +80,6 @@ def resolve_resource_path(relative: str) -> Path:
     raise FileNotFoundError(
         f"资源文件不存在: {text}\n已查找:\n  {local}\n  {bundled}"
     )
+
+
+# 供外部模块统一调用（sanitize_writable_path 定义在 cwdz.paths）

@@ -47,7 +47,7 @@ from cwdz.app.widgets.apple_ui import (
     make_path_trailing,
     make_trailing_bar,
 )
-from cwdz.config import load_settings, resolve_path, resolve_resource_path
+from cwdz.config import load_settings, resolve_path, resolve_resource_path, sanitize_writable_path
 from cwdz.crawler.keytop.batch import download_batch_workbook
 from cwdz.crawler.keytop.client import KeytopClient
 from cwdz.crawler.session import TingsimpleClient
@@ -103,7 +103,11 @@ class Worker(QThread):
                     username=self.kwargs["username"],
                     password=self.kwargs["password"],
                     captcha=self.kwargs["captcha"],
-                    download_dir=self.kwargs.get("download_dir"),
+                    download_dir=sanitize_writable_path(
+                        self.kwargs.get("download_dir", ""),
+                        platform="tingsimple",
+                        purpose="download",
+                    ),
                     on_progress=self.progress.emit,
                 )
                 self.finished_ok.emit(str(path))
@@ -129,7 +133,11 @@ class Worker(QThread):
                         self.kwargs["workbook_path"],
                         self.kwargs["start_date"],
                         self.kwargs["end_date"],
-                        output_dir=self.kwargs.get("download_dir"),
+                        output_dir=sanitize_writable_path(
+                            self.kwargs.get("download_dir", ""),
+                            platform="keytop",
+                            purpose="download",
+                        ),
                         on_progress=self.progress.emit,
                     )
                 summary = (
@@ -164,7 +172,11 @@ class Worker(QThread):
                         build_merge_output_path(merge_result.source_file, stamp),
                     )
                 else:
-                    input_dir = Path(self.kwargs["input_dir"])
+                    input_dir = sanitize_writable_path(
+                        self.kwargs["input_dir"],
+                        platform="tingsimple",
+                        purpose="download",
+                    )
                     merge_result = merge_tingsimple_exports(input_dir)
                     for msg in [
                         f"合并 {len(merge_result.processed_files)} 个文件",
@@ -185,6 +197,12 @@ class Worker(QThread):
             elif self.task == "voucher":
                 platform = self.kwargs.get("platform", "停简单")
                 period = self.kwargs.get("period", "")
+                platform_slug = "keytop" if platform == "科拓" else "tingsimple"
+                output_dir = sanitize_writable_path(
+                    self.kwargs["output_dir"],
+                    platform=platform_slug,
+                    purpose="voucher",
+                )
                 if platform == "科拓":
                     settings = load_settings()
                     kt_voucher = settings.get("voucher", {}).get("keytop", {})
@@ -193,7 +211,7 @@ class Worker(QThread):
                         resolve_resource_path(kt_voucher["account_mapping_path"]),
                         resolve_resource_path(kt_voucher["fee_template_path"]),
                         resolve_resource_path(kt_voucher["withdrawal_template_path"]),
-                        Path(self.kwargs["output_dir"]),
+                        output_dir,
                         period=period,
                         on_progress=self.progress.emit,
                     )
@@ -207,7 +225,7 @@ class Worker(QThread):
                         resolve_resource_path(ts_voucher["unsettled_template_path"]),
                         resolve_resource_path(ts_voucher["fee_template_path"]),
                         resolve_resource_path(ts_voucher["bank_template_path"]),
-                        Path(self.kwargs["output_dir"]),
+                        output_dir,
                         period=period,
                         on_progress=self.progress.emit,
                     )
@@ -266,6 +284,10 @@ class DownloadTab(QWidget):
         memory.load_line_edit(self._username, "inputs/tingsimple/username")
         memory.load_line_edit(self._password, "inputs/tingsimple/password")
         memory.load_line_edit(self._download_dir, "inputs/tingsimple/download_dir")
+        resolved = sanitize_writable_path(
+            self._download_dir.text(), platform="tingsimple", purpose="download"
+        )
+        self._download_dir.setText(str(resolved))
         self._keytop_panel.load_input_memory()
 
     def save_input_memory(self) -> None:
@@ -790,6 +812,11 @@ class ProcessTab(QWidget):
         memory.load_line_edit(
             self._dir_path, f"inputs/process/{self._platform_slug()}/source_path", default
         )
+        slug = self._platform_slug()
+        resolved = sanitize_writable_path(
+            self._dir_path.text(), platform=slug, purpose="download"
+        )
+        self._dir_path.setText(str(resolved))
 
     def save_input_memory(self) -> None:
         memory = input_memory()
@@ -1002,6 +1029,10 @@ class VoucherTab(QWidget):
             f"inputs/voucher/{slug}/output_dir",
             default_output,
         )
+        resolved = sanitize_writable_path(
+            self._output_dir.text(), platform=slug, purpose="voucher"
+        )
+        self._output_dir.setText(str(resolved))
 
     def save_input_memory(self) -> None:
         memory = input_memory()
@@ -1046,7 +1077,9 @@ class VoucherTab(QWidget):
 
     def _browse_output_dir(self) -> None:
         current = self._output_dir.text().strip()
-        start_dir = current if current and Path(current).is_dir() else str(Path.home() / "Downloads" / "凭证")
+        slug = self._platform_slug()
+        fallback = str(sanitize_writable_path("", platform=slug, purpose="voucher"))
+        start_dir = current if current and Path(current).is_dir() else fallback
         path = QFileDialog.getExistingDirectory(self, "选择凭证生成目录", start_dir)
         if path:
             self._output_dir.setText(path)

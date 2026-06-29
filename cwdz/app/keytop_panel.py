@@ -32,7 +32,7 @@ from cwdz.app.widgets.apple_ui import (
     make_path_field,
     make_path_trailing,
 )
-from cwdz.config import load_settings, resolve_path
+from cwdz.config import load_settings, resolve_path, sanitize_writable_path
 
 QR_SIZE = 116
 
@@ -190,6 +190,10 @@ class KeytopDownloadPanel(QWidget):
         memory.load_line_edit(
             self._download_dir, "inputs/keytop/download_dir", self._default_download_dir
         )
+        resolved = sanitize_writable_path(
+            self._download_dir.text(), platform="keytop", purpose="download"
+        )
+        self._download_dir.setText(str(resolved))
 
     def save_input_memory(self) -> None:
         memory = input_memory()

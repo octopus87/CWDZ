@@ -53,17 +53,31 @@ def writable_root() -> Path:
     return app_root()
 
 
+def is_windows_absolute(path_text: str) -> bool:
+    return bool(re.match(r"^[A-Za-z]:[/\\]", (path_text or "").strip()))
+
+
 def is_unusable_absolute(path_text: str) -> bool:
     """当前系统无法使用的绝对路径（如在 Windows 上的 Mac 路径）。"""
     if not path_text:
         return True
     text = path_text.strip().replace("\\", "/")
     if is_windows():
-        if re.match(r"^[A-Za-z]:/", text):
-            return False
+        import os
+
+        foreign_user = re.match(r"^[A-Za-z]:/Users/([^/]+)", text)
+        if foreign_user:
+            user = (os.environ.get("USERNAME") or os.environ.get("USER") or "").lower()
+            if user and foreign_user.group(1).lower() != user:
+                return True
         if text.startswith("/Users/") or text.startswith("/home/"):
             return True
         if text.startswith("/") and not text.startswith("//"):
+            return True
+        if re.match(r"^[A-Za-z]:/", text):
+            return False
+    else:
+        if re.match(r"^[A-Za-z]:/", text):
             return True
     return False
 
@@ -91,11 +105,37 @@ def default_download_dir(platform: str = "tingsimple") -> Path:
     return root / "data" / "downloads"
 
 
+def default_reconcile_output_dir() -> Path:
+    return writable_root() / "data" / "output"
+
+
 def default_voucher_output_dir(platform: str = "tingsimple") -> Path:
     root = writable_root()
     if platform == "keytop":
         return root / "data" / "output" / "vouchers" / "keytop"
     return root / "data" / "output" / "vouchers" / "tingsimple"
+
+
+def sanitize_writable_path(
+    path_text: str,
+    *,
+    platform: str = "tingsimple",
+    purpose: str = "voucher",
+) -> Path:
+    """将界面/配置中的路径解析为当前系统可写目录，过滤 Mac 等非本机路径。"""
+    text = (path_text or "").strip()
+    if not text or is_unusable_absolute(text):
+        if purpose == "download":
+            return default_download_dir(platform)
+        if purpose == "output":
+            return default_reconcile_output_dir()
+        return default_voucher_output_dir(platform)
+    path = Path(text)
+    if is_windows() and is_windows_absolute(text):
+        return Path(text)
+    if path.is_absolute():
+        return path
+    return resolve_under(writable_root(), text)
 
 
 def ensure_voucher_assets() -> None:
