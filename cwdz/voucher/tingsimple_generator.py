@@ -34,6 +34,8 @@ VOUCHER_SHEETS = ("凭证", "凭证 (2)")
 REF_UNSETTLED = "TJDKQJS"
 REF_FEE = "TJDJSSXF"
 REF_BANK = "TJDJS"
+DONGJIANG_PROJECT_TYPE = "新委托管理-东疆"
+COLLECTION_ACCOUNT_CODE = "224119"
 
 
 @dataclass
@@ -41,10 +43,27 @@ class TingsimpleProjectMapping:
     lot_name: str
     project_name: str
     project_code: str
+    project_type: str
     company_code: str
     company_name: str
     bank_code: str
     bank_name: str
+    receivable_account_code: str = "112204"
+    receivable_account_name: str = "自主收费"
+    credit_aux1_type: str = "客户"
+    credit_aux1_code: str = TINGSIMPLE_CLIENT_CODE
+    credit_aux1_name: str = TINGSIMPLE_CLIENT_NAME
+    credit_aux2_type: str = "项目"
+    credit_aux2_code: str = ""
+    credit_aux2_name: str = ""
+    fee_account_code: str = "64010237"
+    fee_account_name: str = "手续费"
+    fee_aux1_type: str = "项目"
+    fee_aux1_code: str = ""
+    fee_aux1_name: str = ""
+    fee_aux2_type: str = ""
+    fee_aux2_code: str = ""
+    fee_aux2_name: str = ""
 
 
 @dataclass
@@ -261,22 +280,51 @@ def _load_project_mappings(
     mapping_path: Path,
     lot_names: set[str],
 ) -> tuple[dict[str, TingsimpleProjectMapping], list[str]]:
-    df = pd.read_excel(mapping_path, sheet_name="项目对应收款账户信息", dtype=str)
+    df = _read_mapping_sheet(mapping_path)
     by_lot: dict[str, TingsimpleProjectMapping] = {}
     by_norm: dict[str, TingsimpleProjectMapping] = {}
 
     for _, row in df.iterrows():
-        lot = str(row.get("车场名称") or "").strip()
+        lot = _mapping_cell(row, "车场名称")
         if not lot:
             continue
+        project_name = _mapping_cell(row, "项目名称") or lot
+        project_code = _mapping_cell(row, "项目编码")
         mapping = TingsimpleProjectMapping(
             lot_name=lot,
-            project_name=str(row.get("项目名称") or lot).strip(),
-            project_code=str(row.get("项目编码") or "").strip(),
-            company_code=str(row.get("公司编码") or "").strip(),
-            company_name=str(row.get("公司") or "").strip(),
-            bank_code=str(row.get("银行编码") or "").strip(),
-            bank_name=str(row.get("银行") or "").strip(),
+            project_name=project_name,
+            project_code=project_code,
+            project_type=_mapping_cell(row, "项目类型"),
+            company_code=_mapping_cell(row, "公司编码"),
+            company_name=_mapping_cell(row, "公司"),
+            bank_code=_mapping_cell(row, "银行编码"),
+            bank_name=_mapping_cell(row, "银行"),
+            receivable_account_code=_mapping_cell(row, "应收账款科目编码") or "112204",
+            receivable_account_name=_mapping_cell(row, "应收账款科目名称") or "自主收费",
+            credit_aux1_type=_mapping_cell(row, "客户") or "客户",
+            credit_aux1_code=_mapping_cell(row, "应收账款科目编码-辅助客户编码1")
+            or TINGSIMPLE_CLIENT_CODE,
+            credit_aux1_name=_mapping_cell(row, "应收账款科目编码-辅助客户名称2")
+            or TINGSIMPLE_CLIENT_NAME,
+            credit_aux2_type=_mapping_cell(row, "项目") or "项目",
+            credit_aux2_code=_mapping_cell(row, "应收账款科目编码-辅助客户编码2")
+            or project_code,
+            credit_aux2_name=_mapping_cell(
+                row,
+                "应收账款科目编码-辅助客户名称2.1",
+                "应收账款科目编码-辅助客户名称2",
+            )
+            or project_name,
+            fee_account_code=_mapping_cell(row, "手续费科目编码") or "64010237",
+            fee_account_name=_mapping_cell(row, "手续费科目名称") or "手续费",
+            fee_aux1_type=_mapping_cell(row, "核算项目1") or "项目",
+            fee_aux1_code=_mapping_cell(row, "手续费科目名称客户辅助1-编码")
+            or project_code,
+            fee_aux1_name=_mapping_cell(row, "手续费科目名称客户辅助1-编码名称")
+            or project_name,
+            fee_aux2_type=_mapping_cell(row, "核算项目2"),
+            fee_aux2_code=_mapping_cell(row, "应收账款科目编码-辅助客户编码2.1"),
+            fee_aux2_name=_mapping_cell(row, "应收账款科目编码-辅助客户名称2.2"),
         )
         by_lot[lot] = mapping
         by_norm[normalize_lot_name(lot)] = mapping
@@ -290,6 +338,63 @@ def _load_project_mappings(
             continue
         mappings[lot_name] = mapping
     return mappings, skipped
+
+
+def _read_mapping_sheet(mapping_path: Path) -> pd.DataFrame:
+    """读取公司对照表，兼容首行为说明、次行为表头的格式。"""
+    preview = pd.read_excel(
+        mapping_path,
+        sheet_name="项目对应收款账户信息",
+        header=0,
+        nrows=1,
+        dtype=str,
+    )
+    first_col = str(preview.columns[0]).strip()
+    header_row = 0 if first_col == "车场名称" else 1
+    return pd.read_excel(
+        mapping_path,
+        sheet_name="项目对应收款账户信息",
+        header=header_row,
+        dtype=str,
+    )
+
+
+def _mapping_cell(row: pd.Series, *column_names: str) -> str:
+    for name in column_names:
+        if name not in row.index:
+            continue
+        value = row.get(name)
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            continue
+        text = str(value).strip()
+        if text and text.lower() != "nan":
+            return text
+    return ""
+
+
+def _account_code(value: str, default: int | str) -> int | str:
+    text = str(value or "").strip()
+    if not text:
+        return default
+    try:
+        return int(float(text))
+    except ValueError:
+        return text
+
+
+def _optional_aux(aux_type: str, code: str, name: str) -> tuple[str | None, str | None, str | None]:
+    """有完整配置时返回核算项目三元组，否则留空。"""
+    if aux_type and code and name:
+        return aux_type, code, name
+    return None, None, None
+
+
+def _fee_side_reversed(mapping: TingsimpleProjectMapping) -> bool:
+    """东疆代收款：借方金额取负记入贷方。"""
+    return (
+        mapping.project_type == DONGJIANG_PROJECT_TYPE
+        and str(mapping.fee_account_code).strip() == COLLECTION_ACCOUNT_CODE
+    )
 
 
 def _build_bank_style_rows(
@@ -364,20 +469,26 @@ def _build_fee_rows(
             reference,
             entry_no,
         )
+        fee_aux2 = _optional_aux(
+            mapping.fee_aux2_type,
+            mapping.fee_aux2_code,
+            mapping.fee_aux2_name,
+        )
+        credit_side = _fee_side_reversed(mapping)
         rows.append(
             {
                 **base,
-                "科目": 64010237,
-                "科目名称": "手续费",
-                "方向": 1,
-                "借方金额": amount,
-                "贷方金额": None,
-                "核算项目1": "项目",
-                "编码1": mapping.project_code,
-                "名称1": mapping.project_name,
-                "核算项目2": None,
-                "编码2": None,
-                "名称2": None,
+                "科目": _account_code(mapping.fee_account_code, 64010237),
+                "科目名称": mapping.fee_account_name or "手续费",
+                "方向": 0 if credit_side else 1,
+                "借方金额": None if credit_side else amount,
+                "贷方金额": -amount if credit_side else None,
+                "核算项目1": mapping.fee_aux1_type or "项目",
+                "编码1": mapping.fee_aux1_code or mapping.project_code,
+                "名称1": mapping.fee_aux1_name or mapping.project_name,
+                "核算项目2": fee_aux2[0],
+                "编码2": fee_aux2[1],
+                "名称2": fee_aux2[2],
             }
         )
         rows.append(_credit_row(base, amount, mapping))
@@ -418,17 +529,17 @@ def _base_row(
 def _credit_row(base: dict, amount: float, mapping: TingsimpleProjectMapping) -> dict:
     return {
         **base,
-        "科目": 112204,
-        "科目名称": "自主收费",
+        "科目": _account_code(mapping.receivable_account_code, 112204),
+        "科目名称": mapping.receivable_account_name or "自主收费",
         "方向": 0,
         "借方金额": None,
         "贷方金额": amount,
-        "核算项目1": "客户",
-        "编码1": TINGSIMPLE_CLIENT_CODE,
-        "名称1": TINGSIMPLE_CLIENT_NAME,
-        "核算项目2": "项目",
-        "编码2": mapping.project_code,
-        "名称2": mapping.project_name,
+        "核算项目1": mapping.credit_aux1_type or "客户",
+        "编码1": mapping.credit_aux1_code or TINGSIMPLE_CLIENT_CODE,
+        "名称1": mapping.credit_aux1_name or TINGSIMPLE_CLIENT_NAME,
+        "核算项目2": mapping.credit_aux2_type or "项目",
+        "编码2": mapping.credit_aux2_code or mapping.project_code,
+        "名称2": mapping.credit_aux2_name or mapping.project_name,
     }
 
 
